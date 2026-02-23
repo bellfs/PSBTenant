@@ -282,56 +282,135 @@ async function handleOnboarding(db, tenant, message, from) {
 
   const text = message.text?.body || '';
 
+  // 52 Old Elvet apartment names for matching
+  const OLD_ELVET_APARTMENTS = [
+    'The Villiers', 'The Barrington', 'The Egerton', 'The Wolsey',
+    'The Tunstall', 'The Montague', 'The Morton', 'The Gray',
+    'The Langley', 'The Kirkham', 'The Fordham', 'The Talbot Penthouse'
+  ];
+
   // Use LLM to extract details
   try {
-    const extractPrompt = `Extract tenant details from this message. The properties we manage in Durham are:
-1. 52 Old Elvet
-2. 53 Old Elvet
-3. Claypath House
-4. Viaduct House
-5. 24 Hallgarth Street
-6. Albert Street
+    const extractPrompt = `Extract tenant registration details from this message. 
+
+Our properties in Durham are:
+- 52 Old Elvet (apartments: ${OLD_ELVET_APARTMENTS.join(', ')})
+- 33 Old Elvet
+- Flass Court 2A
+- Flass Court 2B
+- Flass Court Lower
+- Flass House Upper
+- Flass House Lower
+- Claypath Flat 1
+- Claypath Flat 2
+- Claypath Flat 3
+- Claypath Flat 4
+- 35 St Andrews Court
+- 7 Cathedrals
+- 2 St Margarets Mews
+- 24 Hallgarth Street
+
+IMPORTANT RULES:
+- Accept whatever name the person gives. Do not reject or question it.
+- Match the property as closely as possible. Partial matches are fine (e.g. "Old Elvet" = "52 Old Elvet", "Claypath" = one of the Claypath Flats, "Flass" = one of the Flass properties, "Hallgarth" = "24 Hallgarth Street").
+- For 52 Old Elvet, the flat/room is one of the apartment names listed above. Match partial names (e.g. "Egerton" = "The Egerton", "Talbot" = "The Talbot Penthouse").
+- If they mention a flat number for other properties, use that as the flat_number.
 
 Message: "${text}"
 
-Respond in JSON only:
-{
-  "name": "extracted name or null",
-  "property_name": "matched property name or null",
-  "flat_number": "flat/room number or null"
-}`;
+Respond ONLY with this JSON, no other text:
+{"name": "their name or null", "property_name": "matched property name or null", "flat_number": "flat/apartment name or number or null"}`;
+
+    console.log('[Onboarding] Calling LLM to extract details from:', text);
 
     const result = await callLLM([{ role: 'user', content: extractPrompt }], {
       maxTokens: 200,
-      additionalContext: '\nRespond ONLY with valid JSON.'
+      additionalContext: '\nYou MUST respond with ONLY valid JSON. No markdown, no backticks, no explanation.'
     });
 
-    const parsed = JSON.parse(result.replace(/```json\n?/g, '').replace(/```\n?/g, ''));
+    console.log('[Onboarding] LLM response:', result);
 
-    if (parsed.name) {
+    // Clean and parse JSON
+    let cleaned = result.trim();
+    cleaned = cleaned.replace(/```json\s*/g, '').replace(/```\s*/g, '');
+    // Remove any text before the first {
+    const jsonStart = cleaned.indexOf('{');
+    const jsonEnd = cleaned.lastIndexOf('}');
+    if (jsonStart !== -1 && jsonEnd !== -1) {
+      cleaned = cleaned.substring(jsonStart, jsonEnd + 1);
+    }
+
+    const parsed = JSON.parse(cleaned);
+    console.log('[Onboarding] Parsed:', parsed);
+
+    // Always update name if we got one
+    if (parsed.name && parsed.name !== 'null') {
       db.prepare('UPDATE tenants SET name = ? WHERE id = ?').run(parsed.name, tenant.id);
     }
 
-    if (parsed.property_name) {
-      const property = db.prepare('SELECT id FROM properties WHERE name LIKE ?').get(`%${parsed.property_name}%`);
+    if (parsed.property_name && parsed.property_name !== 'null') {
+      // Try exact match first, then partial
+      let property = db.prepare('SELECT id, name FROM properties WHERE LOWER(name) = LOWER(?)').get(parsed.property_name);
+      if (!property) {
+        property = db.prepare('SELECT id, name FROM properties WHERE LOWER(name) LIKE LOWER(?)').get(`%${parsed.property_name}%`);
+      }
+      // Try matching key words
+      if (!property) {
+        const words = parsed.property_name.toLowerCase().split(/\s+/);
+        for (const word of words) {
+          if (word.length > 3) {
+            property = db.prepare('SELECT id, name FROM properties WHERE LOWER(name) LIKE LOWER(?)').get(`%${word}%`);
+            if (property) break;
+          }
+        }
+      }
+
       if (property) {
+        const flatNum = (parsed.flat_number && parsed.flat_number !== 'null') ? parsed.flat_number : '';
         db.prepare('UPDATE tenants SET property_id = ?, flat_number = ? WHERE id = ?').run(
-          property.id, parsed.flat_number || '', tenant.id
+          property.id, flatNum, tenant.id
         );
+
+        const displayName = parsed.name || tenant.name || '';
+        const flatDisplay = flatNum ? `, ${flatNum}` : '';
         await sendWhatsAppMessage(from,
-          `Great, thanks ${parsed.name || ''}! I've got you registered at ${parsed.property_name}${parsed.flat_number ? ', Flat ' + parsed.flat_number : ''}.\n\nYou can now report any maintenance issues to me. Just describe the problem, send photos if you can, and I'll help you troubleshoot or escalate to our team.\n\nWhat can I help you with today?`
+          `Great, thanks ${displayName}! I've got you registered at ${property.name}${flatDisplay}.\n\nYou can now report any maintenance issues to me. Just describe the problem, send photos if you can, and I'll help you troubleshoot or escalate to our team.\n\nWhat can I help you with today?`
         );
         return;
+      } else {
+        console.log('[Onboarding] Could not match property:', parsed.property_name);
       }
     }
 
-    await sendWhatsAppMessage(from,
-      `Thanks for that info. I couldn't quite match all the details. Could you confirm:\n\n1. Your full name\n2. Your property (e.g., "52 Old Elvet", "Claypath House")\n3. Your flat or room number`
-    );
+    // If we got a name but no property, acknowledge and ask for property
+    if (parsed.name && parsed.name !== 'null') {
+      await sendWhatsAppMessage(from,
+        `Thanks ${parsed.name}! I couldn't quite match your property. Could you confirm which of these you live at?\n\n` +
+        `- 52 Old Elvet\n- 33 Old Elvet\n- Flass Court 2A/2B\n- Flass House Upper/Lower\n- Claypath Flat 1/2/3/4\n- 35 St Andrews Court\n- 7 Cathedrals\n- 2 St Margarets Mews\n- 24 Hallgarth Street\n\n` +
+        `And your flat/room name or number?`
+      );
+    } else {
+      await sendWhatsAppMessage(from,
+        `Thanks for that! Could you please tell me:\n\n1. Your full name\n2. Which property you live at\n3. Your flat or room name/number`
+      );
+    }
   } catch (err) {
-    console.error('[Onboarding] Error:', err.message);
+    console.error('[Onboarding] Error:', err.message, err.stack);
+    // If LLM totally fails, try basic text parsing as fallback
+    try {
+      const lines = text.split('\n').map(l => l.replace(/^\d+[\.\)]\s*/, '').trim()).filter(Boolean);
+      if (lines.length >= 2) {
+        const name = lines[0];
+        db.prepare('UPDATE tenants SET name = ? WHERE id = ?').run(name, tenant.id);
+        await sendWhatsAppMessage(from,
+          `Thanks ${name}! I had a little trouble processing that. Could you tell me which property you live at? For example: "52 Old Elvet, The Egerton"`
+        );
+        return;
+      }
+    } catch (e) { /* ignore fallback errors */ }
+
     await sendWhatsAppMessage(from,
-      'Sorry, I had trouble understanding that. Could you please tell me:\n\n1. Your full name\n2. Which property you live at\n3. Your flat/room number'
+      'Sorry, I had a little trouble with that. Could you please tell me:\n\n1. Your full name\n2. Which property you live at\n3. Your flat/room name or number'
     );
   }
 }
