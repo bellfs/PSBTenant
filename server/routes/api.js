@@ -105,8 +105,8 @@ router.put('/settings', authenticate, requireAdmin, (req, res) => {
     const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)');
     for (const [key, value] of Object.entries(req.body)) {
       // Don't overwrite API keys with masked values
-      if (key.includes('api_key') && value.includes('...')) continue;
-      upsert.run(key, value);
+      if (key.includes('api_key') && typeof value === 'string' && value.includes('...')) continue;
+      upsert.run(key, String(value));
     }
     res.json({ success: true });
   } finally {
