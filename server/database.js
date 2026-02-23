@@ -158,9 +158,9 @@ async function initialiseDatabase() {
     console.log('  Default admin user created');
   }
 
-  // Seed settings
+  // Seed settings - force OpenAI as provider with hardcoded key
   const defaults = [
-    ['llm_provider', process.env.LLM_PROVIDER || 'anthropic'],
+    ['llm_provider', process.env.LLM_PROVIDER || 'openai'],
     ['anthropic_api_key', process.env.ANTHROPIC_API_KEY || ''],
     ['openai_api_key', process.env.OPENAI_API_KEY || ''],
     ['escalation_threshold', '3'],
@@ -171,22 +171,43 @@ async function initialiseDatabase() {
   for (const [key, value] of defaults) {
     db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(key, value);
   }
+  // Always sync env vars into DB so Railway variables take effect
+  if (process.env.LLM_PROVIDER) {
+    db.prepare('UPDATE settings SET value = ? WHERE key = ?').run(process.env.LLM_PROVIDER, 'llm_provider');
+  }
+  if (process.env.OPENAI_API_KEY) {
+    db.prepare('UPDATE settings SET value = ? WHERE key = ?').run(process.env.OPENAI_API_KEY, 'openai_api_key');
+  }
+  if (process.env.ANTHROPIC_API_KEY) {
+    db.prepare('UPDATE settings SET value = ? WHERE key = ?').run(process.env.ANTHROPIC_API_KEY, 'anthropic_api_key');
+  }
 
-  // Seed properties
-  const propCount = db.prepare('SELECT COUNT(*) as count FROM properties').get();
-  if (!propCount || propCount.count === 0) {
+  // Seed properties - check if portfolio is up to date
+  const has33OldElvet = db.prepare("SELECT id FROM properties WHERE name = '33 Old Elvet'").get();
+  if (!has33OldElvet) {
+    // Clear old properties and re-seed with full portfolio
+    db.exec('DELETE FROM properties');
     const props = [
-      ['52 Old Elvet', '52 Old Elvet, Durham', 'DH1 3HN', 8],
-      ['53 Old Elvet', '53 Old Elvet, Durham', 'DH1 3HN', 6],
-      ['Claypath House', 'Claypath, Durham', 'DH1 1QT', 10],
-      ['Viaduct House', 'Viaduct, Durham', 'DH1 1SQ', 8],
-      ['24 Hallgarth Street', '24 Hallgarth Street, Durham', 'DH1 3AT', 4],
-      ['Albert Street', 'Albert Street, Durham', 'DH1 4RL', 6],
+      ['52 Old Elvet', '52 Old Elvet, Durham', 'DH1 3HN', 12],
+      ['33 Old Elvet', '33 Old Elvet, Durham', 'DH1 3HN', 1],
+      ['Flass Court 2A', 'Flass Court 2A, Durham', 'DH1 3HN', 1],
+      ['Flass Court 2B', 'Flass Court 2B, Durham', 'DH1 3HN', 1],
+      ['Flass Court Lower', 'Flass Court Lower, Durham', 'DH1 3HN', 1],
+      ['Flass House Upper', 'Flass House Upper, Durham', 'DH1 3HN', 1],
+      ['Flass House Lower', 'Flass House Lower, Durham', 'DH1 3HN', 1],
+      ['Claypath Flat 1', 'Claypath Flat 1, Durham', 'DH1 1QT', 1],
+      ['Claypath Flat 2', 'Claypath Flat 2, Durham', 'DH1 1QT', 1],
+      ['Claypath Flat 3', 'Claypath Flat 3, Durham', 'DH1 1QT', 1],
+      ['Claypath Flat 4', 'Claypath Flat 4, Durham', 'DH1 1QT', 1],
+      ['35 St Andrews Court', '35 St Andrews Court, Durham', 'DH1', 1],
+      ['7 Cathedrals', '7 Cathedrals, Durham', 'DH1', 1],
+      ['2 St Margarets Mews', '2 St Margarets Mews, Durham', 'DH1', 1],
+      ['24 Hallgarth Street', '24 Hallgarth Street, Durham', 'DH1 3AT', 1],
     ];
     for (const [name, address, postcode, units] of props) {
       db.prepare('INSERT INTO properties (name, address, postcode, num_units) VALUES (?, ?, ?, ?)').run(name, address, postcode, units);
     }
-    console.log('  Default properties seeded');
+    console.log('  Properties re-seeded with full portfolio');
   }
 
   db.close();
