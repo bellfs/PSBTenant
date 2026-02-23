@@ -3,10 +3,17 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 const { initialiseDatabase } = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Ensure data and uploads directories exist
+const dataDir = path.join(__dirname, 'data');
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
 // Middleware
 app.use(cors());
@@ -38,11 +45,27 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, async () => {
   await initialiseDatabase();
+
+  // Log config status for debugging
+  const hasOpenAI = !!(process.env.OPENAI_API_KEY);
+  const hasAnthropic = !!(process.env.ANTHROPIC_API_KEY);
+  const hasWhatsApp = !!(process.env.WHATSAPP_ACCESS_TOKEN);
+  const provider = process.env.LLM_PROVIDER || 'openai';
+
   console.log(`\n  ╔═══════════════════════════════════════════════╗`);
   console.log(`  ║  PSB Properties Maintenance Hub               ║`);
   console.log(`  ║  Server running on http://localhost:${PORT}      ║`);
   console.log(`  ║  WhatsApp webhook: /api/webhook/whatsapp       ║`);
+  console.log(`  ╠═══════════════════════════════════════════════╣`);
+  console.log(`  ║  LLM Provider: ${provider.padEnd(31)}║`);
+  console.log(`  ║  OpenAI Key:   ${(hasOpenAI ? 'SET' : 'MISSING').padEnd(31)}║`);
+  console.log(`  ║  Anthropic Key:${(hasAnthropic ? 'SET' : 'MISSING').padEnd(31)}║`);
+  console.log(`  ║  WhatsApp:     ${(hasWhatsApp ? 'SET' : 'MISSING').padEnd(31)}║`);
   console.log(`  ╚═══════════════════════════════════════════════╝\n`);
+
+  if (!hasOpenAI && !hasAnthropic) {
+    console.warn('  ⚠ WARNING: No LLM API key found. Set OPENAI_API_KEY or ANTHROPIC_API_KEY in environment variables.');
+  }
 });
 
 module.exports = app;
