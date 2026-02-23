@@ -1,0 +1,23 @@
+{
+  "name": "psb-maintenance-dashboard",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5173",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.21.1",
+    "lucide-react": "^0.303.0",
+    "date-fns": "^3.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.43",
+    "@vitejs/plugin-react": "^4.2.1",
+    "vite": "^5.0.8"
+  }
+}
