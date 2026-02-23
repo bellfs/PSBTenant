@@ -10,70 +10,21 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
-
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
-    try {
-      await login(email, password);
-      navigate('/');
-    } catch (err) {
-      setError(err.message || 'Invalid credentials');
-    } finally {
-      setLoading(false);
-    }
+    e.preventDefault(); setError(''); setLoading(true);
+    try { await login(email, password); navigate('/'); } catch (err) { setError(err.message); } finally { setLoading(false); }
   };
-
   return (
     <div className="login-page">
-      <div className="login-card fade-in">
-        <div style={{ textAlign: 'center', marginBottom: 28 }}>
-          <div style={{
-            width: 48, height: 48, borderRadius: 12,
-            background: 'var(--accent-subtle)', display: 'inline-flex',
-            alignItems: 'center', justifyContent: 'center', marginBottom: 16
-          }}>
-            <Wrench size={22} color="var(--accent-light)" />
-          </div>
-          <h1>PSB Maintenance Hub</h1>
-          <p>Sign in to your account</p>
-        </div>
-
+      <div className="login-card">
+        <div style={{ textAlign: 'center', marginBottom: 24 }}><Wrench size={28} style={{ color: 'var(--accent)', marginBottom: 12 }} /></div>
+        <h1>PSB Maintenance Hub</h1>
+        <p>Sign in to manage property maintenance</p>
         {error && <div className="login-error">{error}</div>}
-
         <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label className="form-label">Email</label>
-            <input
-              type="email"
-              className="form-input"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              placeholder="admin@52oldelvet.com"
-              required
-              autoFocus
-            />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Password</label>
-            <input
-              type="password"
-              className="form-input"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder="Enter your password"
-              required
-            />
-          </div>
-          <button
-            type="submit"
-            className="btn btn-primary btn-lg"
-            style={{ width: '100%', justifyContent: 'center', marginTop: 8 }}
-            disabled={loading}
-          >
-            {loading ? <div className="loading-spinner" style={{ width: 16, height: 16, borderWidth: 2 }} /> : 'Sign In'}
-          </button>
+          <div className="form-group"><label className="form-label">Email</label><input className="form-input" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="your@email.com" required /></div>
+          <div className="form-group"><label className="form-label">Password</label><input className="form-input" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" required /></div>
+          <button className="btn btn-primary btn-lg" type="submit" style={{ width: '100%', marginTop: 8 }} disabled={loading}>{loading ? 'Signing in...' : 'Sign In'}</button>
         </form>
       </div>
     </div>
