@@ -1,15 +1,75 @@
 const axios = require('axios');
 const { getDb } = require('../database');
 
+/**
+ * API Key Resolution Order (most to least preferred):
+ * 1. Environment variable (OPENAI_API_KEY or ANTHROPIC_API_KEY)
+ * 2. Database settings table (set via dashboard)
+ * 
+ * Provider Resolution:
+ * 1. Environment variable LLM_PROVIDER
+ * 2. Database settings table
+ * 3. Defaults to 'openai'
+ */
+
 function getSettings() {
-  const db = getDb();
-  const rows = db.prepare('SELECT key, value FROM settings').all();
-  db.close();
-  const settings = {};
-  for (const row of rows) {
-    settings[row.key] = row.value;
+  try {
+    const db = getDb();
+    const rows = db.prepare('SELECT key, value FROM settings').all();
+    db.close();
+    const settings = {};
+    for (const row of rows) {
+      settings[row.key] = row.value;
+    }
+    return settings;
+  } catch (err) {
+    console.error('[LLM] Failed to load settings from DB:', err.message);
+    return {};
   }
-  return settings;
+}
+
+function resolveProvider(settings) {
+  // Env var takes priority, then DB, then default
+  return process.env.LLM_PROVIDER || settings.llm_provider || 'openai';
+}
+
+function resolveApiKey(provider, settings) {
+  if (provider === 'openai') {
+    // Env var first, then DB setting
+    const key = process.env.OPENAI_API_KEY || settings.openai_api_key;
+    if (key && key.length > 10) return key;
+    return null;
+  } else {
+    const key = process.env.ANTHROPIC_API_KEY || settings.anthropic_api_key;
+    if (key && key.length > 10) return key;
+    return null;
+  }
+}
+
+function getProviderAndKey() {
+  const settings = getSettings();
+  let provider = resolveProvider(settings);
+  let key = resolveApiKey(provider, settings);
+
+  // If preferred provider has no key, try the other one
+  if (!key) {
+    const fallbackProvider = provider === 'openai' ? 'anthropic' : 'openai';
+    const fallbackKey = resolveApiKey(fallbackProvider, settings);
+    if (fallbackKey) {
+      console.log(`[LLM] No ${provider} key found, falling back to ${fallbackProvider}`);
+      provider = fallbackProvider;
+      key = fallbackKey;
+    }
+  }
+
+  if (!key) {
+    throw new Error(
+      'No LLM API key configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY in Railway environment variables, ' +
+      'or add a key via the dashboard Settings page.'
+    );
+  }
+
+  return { provider, key };
 }
 
 const SYSTEM_PROMPT = `You are the PSB Properties Maintenance Assistant, a helpful and professional AI that assists tenants in Durham with property maintenance issues.
@@ -50,20 +110,17 @@ SAFETY GUARDRAILS:
 - Never provide legal advice about tenancy agreements`;
 
 async function callLLM(messages, options = {}) {
-  const settings = getSettings();
-  const provider = settings.llm_provider || 'anthropic';
+  const { provider, key } = getProviderAndKey();
+  console.log(`[LLM] Using provider: ${provider}`);
 
   if (provider === 'anthropic') {
-    return callAnthropic(messages, settings, options);
+    return callAnthropic(messages, key, options);
   } else {
-    return callOpenAI(messages, settings, options);
+    return callOpenAI(messages, key, options);
   }
 }
 
-async function callAnthropic(messages, settings, options = {}) {
-  const apiKey = settings.anthropic_api_key;
-  if (!apiKey) throw new Error('Anthropic API key not configured');
-
+async function callAnthropic(messages, apiKey, options = {}) {
   const anthropicMessages = messages.map(m => ({
     role: m.role === 'system' ? 'user' : m.role,
     content: m.content
@@ -81,23 +138,25 @@ async function callAnthropic(messages, settings, options = {}) {
       'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
       'content-type': 'application/json'
-    }
+    },
+    timeout: 30000
   });
 
   return response.data.content[0].text;
 }
 
-async function callOpenAI(messages, settings, options = {}) {
-  const apiKey = settings.openai_api_key;
-  if (!apiKey) throw new Error('OpenAI API key not configured');
+async function callOpenAI(messages, apiKey, options = {}) {
+  const systemContent = options.additionalContext
+    ? SYSTEM_PROMPT + options.additionalContext
+    : SYSTEM_PROMPT;
 
   const openaiMessages = [
-    { role: 'system', content: SYSTEM_PROMPT + (options.additionalContext || '') },
+    { role: 'system', content: systemContent },
     ...messages
   ];
 
   const response = await axios.post('https://api.openai.com/v1/chat/completions', {
-    model: options.model || 'gpt-4o',
+    model: options.model || 'gpt-4o-mini',
     messages: openaiMessages,
     max_tokens: options.maxTokens || 1024,
     temperature: 0.7
@@ -105,15 +164,15 @@ async function callOpenAI(messages, settings, options = {}) {
     headers: {
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json'
-    }
+    },
+    timeout: 30000
   });
 
   return response.data.choices[0].message.content;
 }
 
 async function analyseImage(imageBase64, mimeType, context = '') {
-  const settings = getSettings();
-  const provider = settings.llm_provider || 'anthropic';
+  const { provider, key } = getProviderAndKey();
 
   const imagePrompt = `Analyse this image of a property maintenance issue. Describe what you see in detail, identify the likely problem, assess its severity (low/medium/high/urgent), and suggest a category (plumbing, electrical, heating, appliance, structural, pest, damp_mould, locks_security, other). ${context ? 'Additional context from tenant: ' + context : ''}
 
@@ -129,9 +188,6 @@ Respond in JSON format:
 }`;
 
   if (provider === 'anthropic') {
-    const apiKey = settings.anthropic_api_key;
-    if (!apiKey) throw new Error('Anthropic API key not configured');
-
     const response = await axios.post('https://api.anthropic.com/v1/messages', {
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1024,
@@ -144,19 +200,17 @@ Respond in JSON format:
       }]
     }, {
       headers: {
-        'x-api-key': apiKey,
+        'x-api-key': key,
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json'
-      }
+      },
+      timeout: 30000
     });
 
     return response.data.content[0].text;
   } else {
-    const apiKey = settings.openai_api_key;
-    if (!apiKey) throw new Error('OpenAI API key not configured');
-
     const response = await axios.post('https://api.openai.com/v1/chat/completions', {
-      model: 'gpt-4o',
+      model: 'gpt-4o-mini',
       messages: [{
         role: 'user',
         content: [
@@ -167,9 +221,10 @@ Respond in JSON format:
       max_tokens: 1024
     }, {
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        'Authorization': `Bearer ${key}`,
         'Content-Type': 'application/json'
-      }
+      },
+      timeout: 30000
     });
 
     return response.data.choices[0].message.content;
@@ -177,8 +232,6 @@ Respond in JSON format:
 }
 
 async function searchForFixes(issueDescription, applianceModel = '') {
-  // This uses the LLM to generate search-worthy queries and structured fix suggestions
-  const settings = getSettings();
   const searchPrompt = `Based on this property maintenance issue, suggest practical fixes and resources:
 
 Issue: ${issueDescription}
