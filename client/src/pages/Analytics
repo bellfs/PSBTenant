@@ -1,0 +1,99 @@
+import React, { useState, useEffect } from 'react';
+import { api } from '../utils/api';
+import { Download } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
+
+const COLORS = ['#6366f1','#22c55e','#f59e0b','#ef4444','#3b82f6','#a855f7','#ec4899','#14b8a6','#f97316','#64748b'];
+
+export default function Analytics() {
+  const [data, setData] = useState(null);
+  useEffect(() => { api.getAnalytics().then(setData); }, []);
+  if (!data) return <div style={{padding:40,textAlign:'center'}}><div className="loading-spinner" style={{margin:'0 auto'}}/></div>;
+  const { overview, by_category, by_property, by_month, by_priority, by_status, by_attended, recent_issues } = data;
+
+  const catData = by_category.map(c => ({ name: (c.category||'other').replace(/_/g,' '), count: c.count, cost: c.final_cost || c.est_cost }));
+  const propData = by_property.map(p => ({ name: p.name || 'Unknown', count: p.count, cost: p.final_cost || p.est_cost }));
+  const monthData = [...by_month].reverse().map(m => ({ name: m.month, count: m.count, cost: m.final_cost || m.est_cost }));
+  const statusData = by_status.map(s => ({ name: s.status?.replace(/_/g,' '), value: s.count }));
+  const priorityData = by_priority.map(p => ({ name: p.priority, value: p.count }));
+
+  return (
+    <div className="fade-in">
+      <div className="page-header" style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+        <div><h2>Analytics</h2><p>Maintenance data and insights</p></div>
+        <button className="btn btn-secondary" onClick={() => api.exportAllIssues()}><Download size={15}/> Export All Data (CSV)</button>
+      </div>
+
+      <div className="stats-grid">
+        <div className="stat-card accent"><div className="stat-card-label">Total Issues</div><div className="stat-card-value">{overview.total_issues}</div></div>
+        <div className="stat-card success"><div className="stat-card-label">Resolved</div><div className="stat-card-value">{overview.resolved}</div></div>
+        <div className="stat-card warning"><div className="stat-card-label">Est. Total Cost</div><div className="stat-card-value">£{overview.total_estimated_cost?.toFixed(0)}</div></div>
+        <div className="stat-card" style={{borderLeft:'3px solid #22d3ee'}}><div className="stat-card-label">Actual Spend</div><div className="stat-card-value">£{overview.total_final_cost?.toFixed(0)}</div></div>
+        <div className="stat-card" style={{borderLeft:'3px solid #a855f7'}}><div className="stat-card-label">Est. Total Hours</div><div className="stat-card-value">{overview.total_estimated_hours?.toFixed(0)}h</div></div>
+        <div className="stat-card" style={{borderLeft:'3px solid #f97316'}}><div className="stat-card-label">Avg Resolution Time</div><div className="stat-card-value">{overview.avg_resolution_hours?.toFixed(1)}h</div></div>
+      </div>
+
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:16}}>
+        <div className="card"><div className="card-header"><h3>Issues by Month</h3></div><div className="card-body" style={{height:280}}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={monthData}><CartesianGrid strokeDasharray="3 3" stroke="#2a2a3a"/><XAxis dataKey="name" tick={{fill:'#8888a0',fontSize:11}}/><YAxis tick={{fill:'#8888a0',fontSize:11}}/><Tooltip contentStyle={{background:'#16161f',border:'1px solid #2a2a3a',borderRadius:8,color:'#f0f0f5'}}/><Bar dataKey="count" fill="#6366f1" radius={[4,4,0,0]}/></BarChart>
+          </ResponsiveContainer>
+        </div></div>
+
+        <div className="card"><div className="card-header"><h3>Issues by Category</h3></div><div className="card-body" style={{height:280}}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={catData} layout="vertical"><CartesianGrid strokeDasharray="3 3" stroke="#2a2a3a"/><XAxis type="number" tick={{fill:'#8888a0',fontSize:11}}/><YAxis dataKey="name" type="category" tick={{fill:'#8888a0',fontSize:11}} width={100}/><Tooltip contentStyle={{background:'#16161f',border:'1px solid #2a2a3a',borderRadius:8,color:'#f0f0f5'}}/><Bar dataKey="count" fill="#22c55e" radius={[0,4,4,0]}/></BarChart>
+          </ResponsiveContainer>
+        </div></div>
+      </div>
+
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:16,marginBottom:16}}>
+        <div className="card"><div className="card-header"><h3>By Status</h3></div><div className="card-body" style={{height:240}}>
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart><Pie data={statusData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={{fill:'#f0f0f5',fontSize:11}}>
+              {statusData.map((e,i) => <Cell key={i} fill={COLORS[i%COLORS.length]}/>)}
+            </Pie><Tooltip contentStyle={{background:'#16161f',border:'1px solid #2a2a3a',borderRadius:8,color:'#f0f0f5'}}/></PieChart>
+          </ResponsiveContainer>
+        </div></div>
+
+        <div className="card"><div className="card-header"><h3>By Priority</h3></div><div className="card-body" style={{height:240}}>
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart><Pie data={priorityData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={{fill:'#f0f0f5',fontSize:11}}>
+              {priorityData.map((e,i) => <Cell key={i} fill={['#22c55e','#f59e0b','#f97316','#ef4444'][i]||COLORS[i]}/>)}
+            </Pie><Tooltip contentStyle={{background:'#16161f',border:'1px solid #2a2a3a',borderRadius:8,color:'#f0f0f5'}}/></PieChart>
+          </ResponsiveContainer>
+        </div></div>
+
+        <div className="card"><div className="card-header"><h3>By Property</h3></div><div className="card-body" style={{height:240}}>
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart><Pie data={propData} dataKey="count" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={{fill:'#f0f0f5',fontSize:10}}>
+              {propData.map((e,i) => <Cell key={i} fill={COLORS[i%COLORS.length]}/>)}
+            </Pie><Tooltip contentStyle={{background:'#16161f',border:'1px solid #2a2a3a',borderRadius:8,color:'#f0f0f5'}}/></PieChart>
+          </ResponsiveContainer>
+        </div></div>
+      </div>
+
+      {by_attended?.length > 0 && (
+        <div className="card" style={{marginBottom:16}}><div className="card-header"><h3>Team Activity</h3></div>
+          <div className="table-container"><table><thead><tr><th>Team Member</th><th>Jobs Attended</th><th>Total Cost</th></tr></thead><tbody>
+            {by_attended.map(a => <tr key={a.attended_by}><td style={{fontWeight:500}}>{a.attended_by}</td><td>{a.count}</td><td>£{Number(a.total_cost||0).toFixed(2)}</td></tr>)}
+          </tbody></table></div>
+        </div>
+      )}
+
+      <div className="card"><div className="card-header"><h3>Recent Issues</h3></div>
+        <div className="table-container"><table><thead><tr><th>Ref</th><th>Issue</th><th>Tenant</th><th>Property</th><th>Category</th><th>Status</th><th>Est. Cost</th><th>Final Cost</th><th>Hours</th><th>Attended</th></tr></thead><tbody>
+          {recent_issues.map(i => (
+            <tr key={i.uuid}><td className="issue-ref">{i.uuid}</td><td>{i.title}</td><td>{i.tenant_name}</td><td>{i.property_name}</td>
+              <td style={{textTransform:'capitalize',fontSize:12}}>{(i.category||'').replace(/_/g,' ')}</td>
+              <td><span className={`badge badge-${i.status}`}>{i.status?.replace(/_/g,' ')}</span></td>
+              <td>{i.estimated_cost?'£'+Number(i.estimated_cost).toFixed(0):''}</td>
+              <td style={{fontWeight:i.final_cost?600:'normal'}}>{i.final_cost?'£'+Number(i.final_cost).toFixed(2):''}</td>
+              <td>{i.estimated_hours?Number(i.estimated_hours).toFixed(1)+'h':''}</td>
+              <td style={{fontSize:12}}>{i.attended_by||''}</td></tr>
+          ))}
+        </tbody></table></div>
+      </div>
+    </div>
+  );
+}
